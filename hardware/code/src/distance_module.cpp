@@ -8,21 +8,21 @@ static bool sensorAvailable = false;
 void distance_init() {
   distanceSensor.setTimeout(500);
   if (!distanceSensor.init()) {
-    Serial.println(F("[ToF] ❌ Failed to detect sensor! System will run without distance detection."));
+    Serial.println(F("[ToF] Failed to detect sensor! System will run without distance detection."));
     sensorAvailable = false;
-    return;  // 不再 while(1) 卡死，改为降级运行
+    return;  // Do not freeze; run in degraded mode
   }
 
   sensorAvailable = true;
 
-  // 使用短距模式 (Short) 适合 < 1.3米的精确测量
+  // Use Short mode for accurate measurement at < 1.3 m range
   distanceSensor.setDistanceMode(VL53L1X::Short);
-  distanceSensor.setMeasurementTimingBudget(50000); // 50ms 测量时间
+  distanceSensor.setMeasurementTimingBudget(50000); // 50ms measurement time
 
-  // 开始连续测量，每50ms更新一次
+  // Start continuous measurement, updating every 50ms
   distanceSensor.startContinuous(50);
 
-  Serial.println(F("[ToF] ✅ Module initialized."));
+  Serial.println(F("[ToF] Module initialized."));
 }
 
 int distance_readMM() {
@@ -31,16 +31,16 @@ int distance_readMM() {
   int dist = distanceSensor.read();
   if (distanceSensor.timeoutOccurred()) {
     Serial.println(F("[ToF] TIMEOUT"));
-    return 8190; // 返回一个极大的值代表失效或无穷远
+    return 8190; // Return a very large value representing failure/no object
   }
   return dist;
 }
 
 bool distance_isCatPresent() {
-  if (!sensorAvailable) return false;  // 传感器不可用 → 当没有猫
+  if (!sensorAvailable) return false;  // Sensor unavailable -> treat as no cat
   int dist = distance_readMM();
-  // 距离 > 0 排除了可能出现的 0 异常值
-  // 距离 < 阈值 表示有物体遮挡
+  // dist > 0 filters out possible 0 anomalies
+  // dist < threshold means an object is blocking the sensor
   return (dist > 0 && dist < CAT_PRESENT_THRESHOLD_MM);
 }
 

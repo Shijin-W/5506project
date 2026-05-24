@@ -1,25 +1,25 @@
 #include "rfid_module.h"
 #include "config.h"
 #include <MFRC522_I2C.h>
-#include <Preferences.h>   // ESP32 NVS 掉电不丢失存储
+#include <Preferences.h>   // ESP32 NVS non-volatile storage
 
-// 实例化 RFID 对象 (使用配置中的 I2C 地址，Reset 脚填 -1 不使用硬件复位)
+// RFID reader instance (uses I2C address from config, reset pin -1 = not used)
 static MFRC522_I2C mfrc522(RFID_I2C_ADDR, -1);
 
-// 白名单（动态管理，从 NVS 加载）
+// Whitelist (dynamically managed, loaded from NVS)
 static CatProfile catProfiles[MAX_CATS];
 static int catCount = 0;
 
-// NVS 存储
+// NVS storage
 static Preferences prefs;
 
-// 硬件可用性
+// Hardware availability
 static bool rfidAvailable = false;
 
-// ==================== NVS 读写 ====================
+// ==================== NVS Read/Write ====================
 
 static void loadFromNVS() {
-  prefs.begin("cats", true);  // 只读
+  prefs.begin("cats", true);  // Read-only
   catCount = prefs.getInt("count", 0);
   if (catCount > MAX_CATS) catCount = MAX_CATS;
 
@@ -28,14 +28,14 @@ static void loadFromNVS() {
     catProfiles[i].uid       = prefs.getString(("uid" + idx).c_str(), "");
     catProfiles[i].name      = prefs.getString(("name" + idx).c_str(), "");
     catProfiles[i].bowlSteps = prefs.getInt(("bowl" + idx).c_str(), 0);
-    catProfiles[i].bowlIndex = prefs.getInt(("bidx" + idx).c_str(), i);  // 默认 bowlIndex = 索引
+    catProfiles[i].bowlIndex = prefs.getInt(("bidx" + idx).c_str(), i);  // Default bowlIndex = index
   }
   prefs.end();
 }
 
 static void saveToNVS() {
-  prefs.begin("cats", false);  // 读写
-  prefs.clear();  // 清除所有旧 key，防止删猫后残留脏数据
+  prefs.begin("cats", false);  // Read-write
+  prefs.clear();  // Clear all old keys to prevent stale data after cat removal
   prefs.putInt("count", catCount);
 
   for (int i = 0; i < catCount; i++) {
@@ -46,12 +46,12 @@ static void saveToNVS() {
     prefs.putInt(("bidx" + idx).c_str(), catProfiles[i].bowlIndex);
   }
   prefs.end();
-  Serial.printf("[RFID] 白名单已保存到 NVS (%d 只猫)\n", catCount);
+  Serial.printf("[RFID] Whitelist saved to NVS (%d cats)\n", catCount);
 }
 
-// ==================== 辅助函数 ====================
+// ==================== Helper Functions ====================
 
-// 字节数组转大写无空格字符串
+// Convert byte array to uppercase hex string (no spaces)
 static String getUIDString(byte *uid, byte uidSize) {
   String uidString = "";
   for (byte i = 0; i < uidSize; i++) {
@@ -62,57 +62,63 @@ static String getUIDString(byte *uid, byte uidSize) {
   return uidString;
 }
 
-// ==================== 公开接口 ====================
+// ==================== Public Interface ====================
 
 void rfid_init() {
   mfrc522.PCD_Init();
 
-  // 检查 RFID 硬件是否正常
+  // Check if RFID hardware is responding
   byte version = mfrc522.PCD_ReadRegister(mfrc522.VersionReg);
   if (version == 0x00 || version == 0xFF) {
-    Serial.println(F("[RFID] ❌ Module not detected! Check wiring."));
+    Serial.println(F("[RFID] Module not detected! Check wiring."));
     rfidAvailable = false;
   } else {
-    Serial.printf("[RFID] ✅ Module ready (firmware: 0x%02X)\n", version);
+    Serial.printf("[RFID] Module ready (firmware: 0x%02X)\n", version);
     rfidAvailable = true;
   }
 
-  // 从 NVS 加载白名单
+  // Load whitelist from NVS
   loadFromNVS();
 
-  // 如果 NVS 为空（首次烧录），写入默认的两只猫
-  if (catCount == 0) {
-    Serial.println(F("[RFID] NVS 为空，写入默认猫..."));
-    rfid_addCat("B9BD18C9", "CatA", BOWL_LEFT_STEPS, 0);        // 左碗
-    rfid_addCat("0420D6BAFD1691", "CatB", BOWL_RIGHT_STEPS, 1);  // 右碗
-  }
-
-  // 打印已注册的猫咪
-  Serial.println(F("--- 已注册猫咪 ---"));
+  // Note: no hardcoded default cats; wait for Azure IoT Hub Device Twin sync
   for (int i = 0; i < catCount; i++) {
-    Serial.printf("  [%d] %s  UID: %s  碗步数: %d  碗编号: %d\n",
+    Serial.printf("  [%d] %s  UID: %s  Bowl Steps: %d  Bowl Index: %d\n",
                   i, catProfiles[i].name.c_str(), catProfiles[i].uid.c_str(),
                   catProfiles[i].bowlSteps, catProfiles[i].bowlIndex);
   }
   Serial.println(F("------------------"));
 }
 
+static String injectedMockUid = "";
+
+void rfid_injectMock(const String& uid) {
+  injectedMockUid = uid;
+}
+
 bool rfid_tryRead(String &outUID) {
+  // 1. Check for serial-injected virtual tag first
+  if (injectedMockUid != "") {
+    outUID = injectedMockUid;
+    injectedMockUid = ""; // Clear after one read
+    return true;
+  }
+
+  // 2. Normal hardware read logic
   if (!rfidAvailable) return false;
 
-  // 如果没有新卡
+  // No new card present
   if (!mfrc522.PICC_IsNewCardPresent()) {
     return false;
   }
-  // 如果无法读取
+  // Cannot read card serial
   if (!mfrc522.PICC_ReadCardSerial()) {
     return false;
   }
 
-  // 成功读取，转换 UID
+  // Successfully read, convert UID
   outUID = getUIDString(mfrc522.uid.uidByte, mfrc522.uid.size);
 
-  // 读完立刻休眠该卡片，避免持续重复触发读取
+  // Halt the card immediately to prevent repeated reads during a single approach
   mfrc522.PICC_HaltA();
 
   return true;
@@ -121,10 +127,10 @@ bool rfid_tryRead(String &outUID) {
 int rfid_verifyCat(const String &uid) {
   for (int i = 0; i < catCount; i++) {
     if (catProfiles[i].uid == uid) {
-      return i; // 匹配成功
+      return i; // Match found
     }
   }
-  return -1; // 未授权
+  return -1; // Not authorized
 }
 
 CatProfile* rfid_getCatProfile(int idx) {
@@ -139,36 +145,36 @@ int rfid_getCatCount() {
 }
 
 int rfid_addCat(const String &uid, const String &name, int bowlSteps, int bowlIndex) {
-  // 检查是否已满（最多 2 只猫，受限于 2 个 Load Cell）
+  // Check if whitelist is full (max 2 cats, limited by 2 load cells)
   if (catCount >= MAX_CATS) {
-    Serial.println(F("[RFID] ❌ 白名单已满（最多2只），无法添加"));
+    Serial.println(F("[RFID] Whitelist full (max 2), cannot add"));
     return -1;
   }
 
-  // 检查 UID 是否已存在（防重复）
+  // Check if UID already exists (prevent duplicates)
   for (int i = 0; i < catCount; i++) {
     if (catProfiles[i].uid == uid) {
-      Serial.printf("[RFID] ⚠️ UID %s 已存在于索引 %d\n", uid.c_str(), i);
+      Serial.printf("[RFID] UID %s already exists at index %d\n", uid.c_str(), i);
       return i;
     }
   }
 
-  // 检查碗编号是否冲突（每个碗只能分配给一只猫）
+  // Check if bowl index conflicts (each bowl can only be assigned to one cat)
   for (int i = 0; i < catCount; i++) {
     if (catProfiles[i].bowlIndex == bowlIndex) {
-      Serial.printf("[RFID] ❌ 碗 %d 已被 %s 占用，无法分配给 %s\n",
+      Serial.printf("[RFID] Bowl %d is occupied by %s, cannot assign to %s\n",
                     bowlIndex, catProfiles[i].name.c_str(), name.c_str());
       return -1;
     }
   }
 
-  // bowlIndex 合法性检查
+  // Validate bowl index
   if (bowlIndex < 0 || bowlIndex > 1) {
-    Serial.printf("[RFID] ❌ bowlIndex 必须为 0(左碗) 或 1(右碗)，收到 %d\n", bowlIndex);
+    Serial.printf("[RFID] bowlIndex must be 0(left) or 1(right), received %d\n", bowlIndex);
     return -1;
   }
 
-  // 添加
+  // Add the cat
   int idx = catCount;
   catProfiles[idx].uid = uid;
   catProfiles[idx].name = name;
@@ -176,10 +182,10 @@ int rfid_addCat(const String &uid, const String &name, int bowlSteps, int bowlIn
   catProfiles[idx].bowlIndex = bowlIndex;
   catCount++;
 
-  // 保存到 NVS
+  // Persist to NVS
   saveToNVS();
 
-  Serial.printf("[RFID] ✅ 已添加: %s (UID: %s, 碗编号: %d)\n",
+  Serial.printf("[RFID] Added: %s (UID: %s, Bowl: %d)\n",
                 name.c_str(), uid.c_str(), bowlIndex);
   return idx;
 }
@@ -194,36 +200,45 @@ bool rfid_removeCat(const String &uid) {
   }
 
   if (removeIdx < 0) {
-    Serial.printf("[RFID] ⚠️ UID %s 不在白名单中\n", uid.c_str());
+    Serial.printf("[RFID] UID %s not in whitelist\n", uid.c_str());
     return false;
   }
 
-  Serial.printf("[RFID] 🗑️ 删除: %s (UID: %s)\n",
+  Serial.printf("[RFID] Deleted: %s (UID: %s)\n",
                 catProfiles[removeIdx].name.c_str(), uid.c_str());
 
-  // 把后面的元素往前移（填补空位）
+  // Shift remaining elements forward to fill the gap
   for (int i = removeIdx; i < catCount - 1; i++) {
     catProfiles[i] = catProfiles[i + 1];
   }
   catCount--;
 
-  // 【核心修复】补偿正在喂食的猫的索引偏移
+  // Fix: adjust currentCatIndex if the active feeding cat's index shifted
   extern int currentCatIndex;
   if (currentCatIndex > removeIdx) {
-    // 正在吃饭的猫被往前移了一位，更新游标
+    // Currently feeding cat was shifted forward by one position
     currentCatIndex--;
   } else if (currentCatIndex == removeIdx) {
-    // 正在吃饭的猫被删了（双保险防守）
+    // Currently feeding cat was removed (safety fallback)
     currentCatIndex = -1;
   }
 
-  // 清空最后一个位置
+  // Clear the last position
   catProfiles[catCount] = {"", "", 0, 0};
 
-  // 保存到 NVS
+  // Persist to NVS
   saveToNVS();
 
   return true;
+}
+
+void rfid_clearAll() {
+  for (int i = 0; i < MAX_CATS; i++) {
+    catProfiles[i] = {"", "", 0, 0};
+  }
+  catCount = 0;
+  saveToNVS();
+  Serial.println(F("[RFID] Whitelist cleared (waiting for Twin sync)"));
 }
 
 bool rfid_isAvailable() {

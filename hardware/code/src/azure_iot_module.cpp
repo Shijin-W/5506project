@@ -9,12 +9,12 @@
 #include <ArduinoJson.h>
 #include <time.h>
 
-// mbedtls 用于 SAS Token 的 HMAC-SHA256 签名 (ESP32 自带，无需额外安装)
+// mbedtls for HMAC-SHA256 signing of SAS Token (built-in on ESP32, no extra install needed)
 #include <mbedtls/md.h>
 #include <mbedtls/base64.h>
 
 // ==================== Azure IoT Hub Root CA ====================
-// DigiCert Global Root G2 — Azure IoT Hub 使用的根证书
+// DigiCert Global Root G2 - root certificate used by Azure IoT Hub
 static const char* ROOT_CA = R"EOF(
 -----BEGIN CERTIFICATE-----
 MIIDjjCCAnagAwIBAgIQAzrx5qcRqaC7KGSxHQn65TANBgkqhkiG9w0BAQsFADBh
@@ -40,23 +40,24 @@ hSk=
 -----END CERTIFICATE-----
 )EOF";
 
-// ==================== 全局对象 ====================
+// ==================== Global Objects ====================
 static WiFiClientSecure wifiClient;
 static PubSubClient mqttClient(wifiClient);
 
 // MQTT Topics
 static String telemetryTopic;
 static String c2dTopic;
+static String twinReportedPub;
 
 // SAS Token
 static String sasToken;
 static unsigned long tokenExpiryEpoch = 0;
 
-// MQTT 重连节流
+// MQTT reconnect throttle
 static unsigned long lastMqttAttempt = 0;
 const unsigned long MQTT_RETRY_INTERVAL_MS = 5000;
 
-// ==================== 数据缓存队列 ====================
+// ==================== Data Cache Queue ====================
 #define MAX_CACHED_RECORDS 10
 
 struct CachedRecord {
@@ -72,89 +73,143 @@ static void cacheRecord(const char* json) {
   cache[cacheWriteIdx].json[sizeof(cache[cacheWriteIdx].json) - 1] = '\0';
   cache[cacheWriteIdx].used = true;
   cacheWriteIdx = (cacheWriteIdx + 1) % MAX_CACHED_RECORDS;
-  Serial.println(F("[Azure] 📦 Data cached for retry."));
+  Serial.println(F("[Azure] Data cached for retry."));
 }
 
 static void retryCachedData() {
   for (int i = 0; i < MAX_CACHED_RECORDS; i++) {
     if (cache[i].used) {
       if (mqttClient.publish(telemetryTopic.c_str(), cache[i].json)) {
-        Serial.printf("[Azure] 📤 Cached data resent: %s\n", cache[i].json);
+        Serial.printf("[Azure] Cached data resent: %s\n", cache[i].json);
         cache[i].used = false;
       } else {
-        // 发送失败，下次再试
+        // Send failed, retry next time
         break;
       }
     }
   }
 }
 
-// 外部状态查询（main.cpp 中定义）
-extern int currentCatIndex;
+// External control functions defined in main.cpp
+extern void startScanMode(const String& opId, int timeoutSec, int trayIndex);
+extern void cancelScanMode();
 
-// ==================== C2D 消息回调 ====================
-static void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  Serial.printf("[C2D] Received message on topic: %s\n", topic);
+// ==================== Device Twin Handling ====================
+static int appliedConfigVersion = 0;
+static int reportRid = 100;
 
-  // 解析 JSON 指令
+static void reportAppliedConfig() {
   JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, payload, length);
-  if (err) {
-    Serial.printf("[C2D] ❌ JSON parse error: %s\n", err.c_str());
+  doc["configVersionApplied"] = appliedConfigVersion;
+
+  JsonObject known = doc["knownCats"].to<JsonObject>();
+  for (int i = 0; i < rfid_getCatCount(); i++) {
+    CatProfile* cat = rfid_getCatProfile(i);
+    if (cat) {
+      String catId = (cat->bowlIndex == 0) ? "cat_a" : "cat_b";
+      known[catId] = cat->uid;
+    }
+  }
+
+  time_t now; time(&now);
+  char timeBuf[30];
+  strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
+  doc["lastSyncTime"] = timeBuf;
+
+  char buf[512];
+  serializeJson(doc, buf, sizeof(buf));
+  String topic = twinReportedPub + String(reportRid++);
+  mqttClient.publish(topic.c_str(), buf);
+  Serial.printf("[Twin] Reported: %s\n", buf);
+}
+
+static void applyDesiredConfig(JsonObject desired) {
+  int newVersion = desired["configVersion"] | 0;
+  if (newVersion <= appliedConfigVersion && appliedConfigVersion > 0) {
+    Serial.printf("[Twin] configVersion %d is up to date, skipping\n", newVersion);
     return;
   }
 
-  const char* action = doc["action"];
-  if (!action) {
-    Serial.println(F("[C2D] ⚠️ Missing 'action' field"));
-    return;
+  JsonObject cats = desired["cats"];
+  if (!cats.isNull()) {
+    rfid_clearAll();  // Clear whitelist, rebuild from scratch
+
+    for (JsonPair kv : cats) {
+      String catId = kv.key().c_str();
+      JsonObject cat = kv.value().as<JsonObject>();
+
+      String uid  = cat["catUID"].as<String>();
+      String name = cat["catName"].as<String>();
+
+      // Bowl assignment: bowlIndex inferred from catId key
+      int bowlIndex = (catId == "cat_a") ? 0 : 1; 
+      int bowlSteps = (bowlIndex == 0) ? BOWL_LEFT_STEPS : BOWL_RIGHT_STEPS;
+
+      rfid_addCat(uid, name, bowlSteps, bowlIndex);
+    }
   }
 
-  if (strcmp(action, "add_cat") == 0) {
-    // 字段完整性检查
-    if (!doc.containsKey("uid") || !doc.containsKey("name") ||
-        !doc.containsKey("bowlSteps") || !doc.containsKey("bowlIndex")) {
-      Serial.println(F("[C2D] ❌ add_cat: missing required fields (uid/name/bowlSteps/bowlIndex)"));
+  appliedConfigVersion = newVersion;
+  reportAppliedConfig();
+  Serial.printf("[Twin] Applied configVersion %d\n", newVersion);
+}
+
+static void handleTwinFullResponse(byte* payload, unsigned int length) {
+  JsonDocument doc;
+  if (deserializeJson(doc, payload, length)) return;
+  JsonObject desired = doc["desired"];
+  if (!desired.isNull()) applyDesiredConfig(desired);
+}
+
+static void handleDesiredPatch(byte* payload, unsigned int length) {
+  JsonDocument doc;
+  if (deserializeJson(doc, payload, length)) return;
+  applyDesiredConfig(doc.as<JsonObject>());
+}
+
+// ==================== C2D / Twin Message Callback ====================
+static void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  String t = String(topic);
+
+  if (t.startsWith("$iothub/twin/res/")) {
+    int statusCode = t.substring(17, 20).toInt();
+    if (statusCode == 200) {
+      handleTwinFullResponse(payload, length);
+    }
+  } else if (t.startsWith("$iothub/twin/PATCH/properties/desired/")) {
+    handleDesiredPatch(payload, length);
+  } else if (t.indexOf("devicebound") > 0) {
+    // Parse C2D one-time command
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, payload, length);
+    if (err) {
+      Serial.printf("[C2D] JSON parse error: %s\n", err.c_str());
       return;
     }
-    String uid = doc["uid"].as<String>();
-    String name = doc["name"].as<String>();
-    int bowlSteps = doc["bowlSteps"].as<int>();
-    int bowlIndex = doc["bowlIndex"].as<int>();
-    int idx = rfid_addCat(uid, name, bowlSteps, bowlIndex);
-    Serial.printf("[C2D] %s 添加猫: %s → 索引 %d\n", (idx >= 0) ? "✅" : "❌", name.c_str(), idx);
 
-  } else if (strcmp(action, "remove_cat") == 0) {
-    if (!doc.containsKey("uid")) {
-      Serial.println(F("[C2D] ❌ remove_cat: missing 'uid' field"));
-      return;
-    }
-    // 安全检查：正在喂食的猫不能删除
-    String uid = doc["uid"].as<String>();
-    if (currentCatIndex >= 0) {
-      CatProfile* feedingCat = rfid_getCatProfile(currentCatIndex);
-      if (feedingCat && feedingCat->uid == uid) {
-        Serial.println(F("[C2D] ❌ 该猫正在喂食中，拒绝删除！"));
-        return;
-      }
-    }
-    bool ok = rfid_removeCat(uid);
-    Serial.printf("[C2D] %s 删除猫: %s\n", ok ? "✅" : "❌", uid.c_str());
+    const char* action = doc["action"];
+    if (!action) return;
 
-  } else {
-    Serial.printf("[C2D] ⚠️ Unknown action: %s\n", action);
+    if (strcmp(action, "start_scan") == 0) {
+      String opId = doc["operationId"].as<String>();
+      int timeout = doc["timeoutSec"] | 120; // Default 120 seconds
+      int trayIndex = doc["trayIndex"] | -1; // Parse trayIndex field
+      startScanMode(opId, timeout, trayIndex);
+    } else if (strcmp(action, "cancel_scan") == 0) {
+      cancelScanMode();
+    }
   }
 }
 
-// ==================== 内部函数声明 ====================
+// ==================== Internal Function Declarations ====================
 static void connectWiFi();
 static void syncNTP();
 static String generateSASToken(unsigned long expiryEpoch);
 static String urlEncode(const String& str);
 static void connectMQTT();
 
-// ==================== WiFi 连接 ====================
-// 阻塞版：仅在 setup() 首次连接时使用（可以等 20 秒）
+// ==================== WiFi Connection ====================
+// Blocking version: used only during setup() for initial connection (may wait up to 20s)
 static void connectWiFi() {
   Serial.printf("[Azure] Connecting to WiFi '%s'", WIFI_SSID);
   WiFi.mode(WIFI_STA);
@@ -170,28 +225,28 @@ static void connectWiFi() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf("\n[Azure] WiFi connected! IP: %s\n", WiFi.localIP().toString().c_str());
   } else {
-    Serial.println("\n[Azure] ❌ WiFi connection failed! Check SSID/password.");
+    Serial.println("\n[Azure] WiFi connection failed! Check SSID/password.");
   }
 }
 
-// 非阻塞版：运行中 WiFi 断了用这个，不卡住 loop()
+// Non-blocking version: used at runtime when WiFi drops, does not block loop()
 static void tryReconnectWiFi() {
   if (WiFi.status() == WL_CONNECTED) return;
   Serial.println(F("[Azure] WiFi lost, attempting reconnect..."));
   WiFi.disconnect();
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  // 不等！下一次 azure_loop() 会再检查
+  // Do not wait! Next azure_loop() iteration will check again
 }
 
-// ==================== NTP 时间同步 ====================
+// ==================== NTP Time Sync ====================
 static void syncNTP() {
   Serial.println(F("[Azure] Syncing time via NTP..."));
   configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET, NTP_SERVER);
 
-  // 等待时间同步（最多 15 秒）
+  // Wait for time sync (max 15 seconds)
   time_t now = 0;
   int attempts = 0;
-  while (now < 1700000000 && attempts < 30) {  // 2023年以后的时间戳
+  while (now < 1700000000 && attempts < 30) {  // Timestamps after 2023
     delay(500);
     time(&now);
     attempts++;
@@ -202,34 +257,34 @@ static void syncNTP() {
     localtime_r(&now, &timeinfo);
     Serial.printf("[Azure] Time synced: %s", asctime(&timeinfo));
   } else {
-    Serial.println(F("[Azure] ❌ NTP sync failed!"));
+    Serial.println(F("[Azure] NTP sync failed!"));
   }
 }
 
-// ==================== SAS Token 生成 ====================
+// ==================== SAS Token Generation ====================
 static String generateSASToken(unsigned long expiryEpoch) {
-  // 1. 构建资源 URI
+  // 1. Build resource URI
   String resourceUri = String(IOT_HUB_HOST) + "/devices/" + String(DEVICE_ID);
   String encodedUri = urlEncode(resourceUri);
 
-  // 2. 构建待签名字符串
+  // 2. Build string to sign
   String toSign = encodedUri + "\n" + String(expiryEpoch);
 
   Serial.printf("[Azure] SAS: URI=%s\n", resourceUri.c_str());
   Serial.printf("[Azure] SAS: Expiry=%lu\n", expiryEpoch);
 
-  // 3. Base64 解码设备密钥
+  // 3. Base64-decode the device key
   size_t keyLen = 0;
   unsigned char decodedKey[64];
   int decRet = mbedtls_base64_decode(decodedKey, sizeof(decodedKey), &keyLen,
                         (const unsigned char*)DEVICE_KEY, strlen(DEVICE_KEY));
   if (decRet != 0) {
-    Serial.printf("[Azure] ❌ Base64 decode failed! ret=%d\n", decRet);
+    Serial.printf("[Azure] Base64 decode failed! ret=%d\n", decRet);
     return "";
   }
   Serial.printf("[Azure] SAS: Key decoded, %d bytes\n", (int)keyLen);
 
-  // 4. HMAC-SHA256 签名
+  // 4. HMAC-SHA256 signature
   unsigned char signature[32];
   mbedtls_md_context_t ctx;
   mbedtls_md_init(&ctx);
@@ -239,14 +294,14 @@ static String generateSASToken(unsigned long expiryEpoch) {
   mbedtls_md_hmac_finish(&ctx, signature);
   mbedtls_md_free(&ctx);
 
-  // 5. Base64 编码签名
+  // 5. Base64-encode the signature
   unsigned char encodedSignature[64];
   size_t encodedLen = 0;
   mbedtls_base64_encode(encodedSignature, sizeof(encodedSignature), &encodedLen,
                         signature, 32);
   String sigStr = String((char*)encodedSignature).substring(0, encodedLen);
 
-  // 6. 组装 SAS Token
+  // 6. Assemble the SAS Token string
   String token = "SharedAccessSignature sr=" + encodedUri +
                  "&sig=" + urlEncode(sigStr) +
                  "&se=" + String(expiryEpoch);
@@ -255,7 +310,7 @@ static String generateSASToken(unsigned long expiryEpoch) {
   return token;
 }
 
-// URL 编码
+// URL encoding
 static String urlEncode(const String& str) {
   String encoded = "";
   for (unsigned int i = 0; i < str.length(); i++) {
@@ -271,92 +326,104 @@ static String urlEncode(const String& str) {
   return encoded;
 }
 
-// ==================== MQTT 连接 ====================
+// ==================== MQTT Connection ====================
 static void connectMQTT() {
-  // 检查是否需要刷新 Token
+  // Check if token needs refresh
   time_t now;
   time(&now);
 
   Serial.printf("[Azure] Current epoch time: %lu\n", (unsigned long)now);
 
-  // 首次调用时 tokenExpiryEpoch=0，必须生成 Token
-  // 或者当 Token 即将过期时（提前 2 分钟）也刷新
+  // On first call tokenExpiryEpoch=0, must generate token
+  // Also refresh when token is about to expire (2 minutes before expiry)
   if (tokenExpiryEpoch == 0 || (unsigned long)now >= tokenExpiryEpoch - 120) {
     if ((unsigned long)now < 1700000000) {
-      Serial.println(F("[Azure] ❌ NTP time not synced yet, cannot generate SAS token."));
+      Serial.println(F("[Azure] NTP time not synced yet, cannot generate SAS token."));
       return;
     }
     tokenExpiryEpoch = (unsigned long)now + (SAS_TOKEN_DURATION_MINS * 60);
     sasToken = generateSASToken(tokenExpiryEpoch);
     if (sasToken.length() == 0) {
-      Serial.println(F("[Azure] ❌ SAS token generation failed!"));
+      Serial.println(F("[Azure] SAS token generation failed!"));
       return;
     }
   }
 
-  // MQTT 连接参数
+  // MQTT connection parameters
   String username = String(IOT_HUB_HOST) + "/" + String(DEVICE_ID) + "/?api-version=2021-04-12";
 
   mqttClient.setServer(IOT_HUB_HOST, 8883);
-  mqttClient.setBufferSize(1024);
-  mqttClient.setCallback(mqttCallback);  // 设置 C2D 回调
+  mqttClient.setBufferSize(2048);  // Increase buffer size; Twin data can be large
+  mqttClient.setCallback(mqttCallback);
 
   Serial.println(F("[Azure] Connecting to IoT Hub MQTT..."));
 
   if (mqttClient.connect(DEVICE_ID, username.c_str(), sasToken.c_str())) {
-    Serial.println(F("[Azure] ✅ MQTT connected to Azure IoT Hub!"));
+    Serial.println(F("[Azure] MQTT connected to Azure IoT Hub!"));
 
-    // 订阅 C2D (Cloud-to-Device) 消息
+    // Subscribe to C2D (Cloud-to-Device) messages
     if (mqttClient.subscribe(c2dTopic.c_str())) {
-      Serial.println(F("[Azure] ✅ Subscribed to C2D messages."));
+      Serial.println(F("[Azure] Subscribed to C2D messages."));
     } else {
-      Serial.println(F("[Azure] ⚠️ Failed to subscribe to C2D topic."));
+      Serial.println(F("[Azure] Failed to subscribe to C2D topic."));
     }
 
-    // 连接成功后尝试补发缓存数据
+    // Subscribe to Device Twin responses and patches
+    if (mqttClient.subscribe("$iothub/twin/res/#")) {
+      Serial.println(F("[Azure] Subscribed to Twin responses."));
+    }
+    if (mqttClient.subscribe("$iothub/twin/PATCH/properties/desired/#")) {
+      Serial.println(F("[Azure] Subscribed to Twin desired updates."));
+    }
+
+    // On each MQTT connect, request full Twin document for sync
+    mqttClient.publish("$iothub/twin/GET/?$rid=1", "");
+
+    // After successful connection, retry sending cached data
     retryCachedData();
 
   } else {
-    Serial.printf("[Azure] ❌ MQTT connection failed, rc=%d\n", mqttClient.state());
+    Serial.printf("[Azure] MQTT connection failed, rc=%d\n", mqttClient.state());
   }
 }
 
-// ==================== 公开接口 ====================
+// ==================== Public Interface ====================
 
 void azure_init() {
-  // 初始化缓存队列
+  // Initialize cache queue
   for (int i = 0; i < MAX_CACHED_RECORDS; i++) {
     cache[i].used = false;
   }
 
-  // 1. 连 WiFi
+  // 1. Connect WiFi
   connectWiFi();
   if (WiFi.status() != WL_CONNECTED) return;
 
-  // 2. 同步时间（SAS Token 需要准确时间）
+  // 2. Sync time (SAS Token requires accurate time)
   syncNTP();
 
-  // 3. 设置 TLS 证书
+  // 3. Set TLS root certificate
   wifiClient.setCACert(ROOT_CA);
 
-  // 4. 构建 MQTT Topics
+  // 4. Build MQTT topics
   telemetryTopic = "devices/" + String(DEVICE_ID) + "/messages/events/";
   c2dTopic = "devices/" + String(DEVICE_ID) + "/messages/devicebound/#";
+  twinReportedPub = "$iothub/twin/PATCH/properties/reported/?$rid=";
 
-  // 5. 连接 MQTT
+  // 5. Connect MQTT
   connectMQTT();
 }
 
 void azure_loop() {
-  // WiFi 断了就非阻塞重连（不卡住 loop）
+  // Non-blocking WiFi reconnect (does not block loop)
   if (WiFi.status() != WL_CONNECTED) {
     if (millis() - lastMqttAttempt < MQTT_RETRY_INTERVAL_MS) return;
     lastMqttAttempt = millis();
-    tryReconnectWiFi();  // 非阻塞：只发起连接，不等结果
+    tryReconnectWiFi();  // Non-blocking: initiates connection, does not wait
     return;
   }
 
-  // MQTT 断了就重连（带节流）
+  // MQTT reconnect with throttle
   if (!mqttClient.connected()) {
     if (millis() - lastMqttAttempt < MQTT_RETRY_INTERVAL_MS) return;
     lastMqttAttempt = millis();
@@ -364,23 +431,23 @@ void azure_loop() {
     return;
   }
 
-  // PubSubClient 内部维护（处理心跳 + 接收 C2D 消息）
+  // PubSubClient internal maintenance (keepalive + receive C2D messages)
   mqttClient.loop();
 }
 
 void azure_sendFeedingData(int catIndex, unsigned long feedingStartMs, float intakeGrams) {
-  // 获取猫咪信息
+  // Get cat profile
   CatProfile* cat = rfid_getCatProfile(catIndex);
   if (!cat) return;
 
-  // 获取当前时间戳
+  // Get current timestamp
   time_t now;
   time(&now);
 
-  // 计算喂食时长（秒）
+  // Calculate feeding duration in seconds
   unsigned long feedingDurationSec = (millis() - feedingStartMs) / 1000;
 
-  // 构建 JSON
+  // Build JSON payload
   JsonDocument doc;
   doc["deviceId"]         = DEVICE_ID;
   doc["catName"]          = cat->name;
@@ -390,7 +457,7 @@ void azure_sendFeedingData(int catIndex, unsigned long feedingStartMs, float int
   doc["feedingStartTime"] = (unsigned long)now - feedingDurationSec;
   doc["durationSec"]      = feedingDurationSec;
 
-  // intakeGrams: -1 表示称重不可用，传 null 给后端
+  // intakeGrams: -1 means weighing unavailable, send null to backend
   if (intakeGrams >= 0) {
     doc["intakeGrams"] = serialized(String(intakeGrams, 1));
   } else {
@@ -400,11 +467,10 @@ void azure_sendFeedingData(int catIndex, unsigned long feedingStartMs, float int
   char jsonBuffer[512];
   serializeJson(doc, jsonBuffer, sizeof(jsonBuffer));
 
-  // 尝试发送
   if (mqttClient.connected() && mqttClient.publish(telemetryTopic.c_str(), jsonBuffer)) {
-    Serial.printf("[Azure] ✅ Data sent: %s\n", jsonBuffer);
+    Serial.printf("[Azure] Data sent: %s\n", jsonBuffer);
   } else {
-    Serial.println(F("[Azure] ⚠️ Send failed, caching for retry..."));
+    Serial.println(F("[Azure] Send failed, caching for retry..."));
     cacheRecord(jsonBuffer);
   }
 }
@@ -424,7 +490,7 @@ void azure_sendHardwareFault(const char* hardwareName, const char* detail) {
   serializeJson(doc, jsonBuffer, sizeof(jsonBuffer));
 
   if (mqttClient.connected() && mqttClient.publish(telemetryTopic.c_str(), jsonBuffer)) {
-    Serial.printf("[Azure] ⚠️ Fault reported: %s\n", jsonBuffer);
+    Serial.printf("[Azure] Fault reported: %s\n", jsonBuffer);
   } else {
     Serial.println(F("[Azure] Fault report queued."));
     cacheRecord(jsonBuffer);
@@ -446,8 +512,50 @@ void azure_sendHeartbeat(bool rfidOk, bool tofOk, bool motorOk) {
   char jsonBuffer[256];
   serializeJson(doc, jsonBuffer, sizeof(jsonBuffer));
 
-  // 心跳包如果不通就不缓存了，丢了就丢了，等下个周期
+  // Heartbeat is not cached if offline; missing a few is acceptable
   if (mqttClient.connected() && mqttClient.publish(telemetryTopic.c_str(), jsonBuffer)) {
-    Serial.printf("[Azure] 💓 Heartbeat sent: %s\n", jsonBuffer);
+    Serial.printf("[Azure] Heartbeat sent: %s\n", jsonBuffer);
+  }
+}
+
+void azure_sendScanTelemetry(const String& operationId, const String& uid) {
+  JsonDocument doc;
+  doc["deviceId"]    = DEVICE_ID;
+  doc["event"]       = "tag_scanned";
+  doc["operationId"] = operationId;
+  doc["uid"]         = uid;
+  time_t now; time(&now);
+  doc["timestamp"]   = (unsigned long)now;
+
+  char buf[256];
+  serializeJson(doc, buf, sizeof(buf));
+  if (mqttClient.connected()) {
+    mqttClient.publish(telemetryTopic.c_str(), buf);
+    Serial.printf("[Azure] Scan telemetry sent: %s\n", buf);
+  } else {
+    cacheRecord(buf);
+  }
+}
+
+void azure_sendScanStatus(const String& operationId, const char* status, const char* reason) {
+  JsonDocument doc;
+  doc["deviceId"]    = DEVICE_ID;
+  doc["event"]       = "scan_status";
+  doc["operationId"] = operationId;
+  doc["status"]      = status;
+  if (reason) {
+    doc["reason"]    = reason;
+  }
+  time_t now; time(&now);
+  doc["timestamp"]   = (unsigned long)now;
+
+  char buf[256];
+  serializeJson(doc, buf, sizeof(buf));
+  if (mqttClient.connected()) {
+    mqttClient.publish(telemetryTopic.c_str(), buf);
+    Serial.printf("[Azure] Scan status sent: %s\n", buf);
+  } else {
+    // Status is important, cache to prevent data loss on disconnect
+    cacheRecord(buf);
   }
 }
