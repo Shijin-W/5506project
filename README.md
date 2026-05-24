@@ -21,32 +21,6 @@ Multi-cat households face a common problem: one cat may eat another's food, lead
 3. **Cloud Monitoring** — Feeding records are sent to Azure IoT Hub, processed by Azure Functions, and displayed on a web dashboard.
 4. **Health Alerts** — If a cat hasn't eaten or exceeds its daily target, the system sends email alerts to the owner.
 
-## System Architecture
-
-```
-┌──────────────┐        MQTT/TLS        ┌────────────────────┐
-│  ESP32 Device│ ─────────────────────►  │  Azure IoT Hub     │
-│  (Firmware)  │  ◄─────────────────── │  (Cloud Gateway)   │
-│              │  Device Twin + C2D     └────────┬───────────┘
-└──────────────┘                                 │ Event Hub trigger
-                                                 ▼
-                                       ┌────────────────────┐
-                                       │  Azure Functions   │
-                                       │  (Python Backend)  │
-                                       └────────┬───────────┘
-                                                 │ REST API
-                                                 ▼
-                                       ┌────────────────────┐
-                                       │  Web Dashboard     │
-                                       │  (HTML/JS Frontend)│
-                                       └────────────────────┘
-```
-
-**Data flow:**
-1. The ESP32 reads sensor data and publishes telemetry to Azure IoT Hub via MQTT over TLS.
-2. Azure Functions process incoming events (Event Hub trigger), store feeding records in Azure Table Storage, and generate health alerts.
-3. The web dashboard fetches data from the Azure Functions REST API and displays feeding summaries, analytics charts, and alert history.
-
 ## Hardware Setup
 
 ### Components Required
@@ -191,7 +165,7 @@ The ESP32 firmware runs a **6-state finite state machine (FSM)** in a non-blocki
 
 ```
 IDLE ──► DETECTING ──► OPENING ──► FEEDING ──► CLOSING ──► IDLE
-                                                    │
+                                                    
 IDLE ──► SCAN_RFID ──► IDLE       (Cloud-triggered RFID binding)
 ```
 
