@@ -1,0 +1,29 @@
+# OS/editor files
+.DS_Store
+Thumbs.db
+~$*
+.vscode/
+
+# Python/backend local files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.python_packages/
+backend/local.settings.json
+backend/.azure-cli-extensions/
+backend/artifacts/
+*.zip
+*.bundle
+
+# Frontend local secrets
+frontend/static/js/config.local.js
+
+# PlatformIO build output
+.pio/
+hardware/code/IOTProject/.pio/
+
+# Local reports and presentation exports
+Project Report/
+presentation/
+task.md

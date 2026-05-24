@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>Analytics - Smart Multi-Cat Feeder</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+
+  <link rel="stylesheet" href="static/css/style.css" />
+</head>
+
+<body>
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container-fluid">
+      <a class="navbar-brand fw-bold" href="index.html">
+        Smart Multi-Cat Feeder
+      </a>
+
+      <button
+        class="navbar-toggler"
+        type="button"
+        data-bs-toggle="collapse"
+        data-bs-target="#navbarNav"
+      >
+        <span class="navbar-toggler-icon"></span>
+      </button>
+
+      <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav ms-auto">
+          <li class="nav-item">
+            <a class="nav-link" href="index.html">Dashboard</a>
+          </li>
+
+          <li class="nav-item">
+            <a class="nav-link" href="records.html?v=20260518-records-range">Feeding Records</a>
+          </li>
+
+          <li class="nav-item">
+            <a class="nav-link active" href="analytics.html">Analytics</a>
+          </li>
+
+          <li class="nav-item">
+            <a class="nav-link" href="alerts.html">Health Alerts</a>
+          </li>
+
+          <li class="nav-item">
+            <a class="nav-link" href="cats.html">Cat Management</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container my-4">
+    <div class="page-heading-row mb-4">
+      <div>
+        <h1 class="page-title">Food Intake Analytics</h1>
+        <p class="text-muted mb-0">
+          Visualize food intake and compare feeding patterns between cats.
+        </p>
+      </div>
+
+      <div class="device-sync-pill">
+        <span class="sync-dot"></span>
+        <span>Last sync: loading...</span>
+        <span class="sync-divider"></span>
+        <span>Device ID: FEEDER-01</span>
+      </div>
+    </div>
+
+    <!-- Date range filter -->
+    <div class="card mb-4">
+      <div class="card-body">
+        <div class="row g-3 align-items-end">
+          <div class="col-lg-3 col-md-6">
+            <label class="form-label" for="analyticsRangePreset">Range</label>
+            <select id="analyticsRangePreset" class="form-select">
+              <option value="today">Today</option>
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+
+          <div class="col-lg-3 col-md-6">
+            <label class="form-label" for="analyticsStartDate">Start Date</label>
+            <input id="analyticsStartDate" class="form-control" type="date" />
+          </div>
+
+          <div class="col-lg-3 col-md-6">
+            <label class="form-label" for="analyticsEndDate">End Date</label>
+            <input id="analyticsEndDate" class="form-control" type="date" />
+          </div>
+
+          <div class="col-lg-3 col-md-6">
+            <button id="analyticsApplyRange" class="btn btn-primary w-100" type="button">
+              <i class="bi bi-calendar-check"></i>
+              Apply Range
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Summary stat cards -->
+    <div class="row g-3 mb-4">
+      <div class="col-md-4">
+        <div class="card summary-card">
+          <div class="card-body">
+            <div class="summary-card-inner">
+              <div class="summary-icon summary-icon-blue">
+                <i class="bi bi-trophy-fill"></i>
+              </div>
+              <div class="summary-card-content">
+                <h6 class="card-subtitle text-muted">Highest Intake Cat</h6>
+                <h2 id="highestIntakeCat" class="card-value text-primary">-</h2>
+                <small class="text-muted analytics-range-label">based on selected range</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-4">
+        <div class="card summary-card">
+          <div class="card-body">
+            <div class="summary-card-inner">
+              <div class="summary-icon summary-icon-warning">
+                <i class="bi bi-arrow-down-circle-fill"></i>
+              </div>
+              <div class="summary-card-content">
+                <h6 class="card-subtitle text-muted">Lowest Intake Cat</h6>
+                <h2 id="lowestIntakeCat" class="card-value text-warning">-</h2>
+                <small class="text-muted analytics-range-label">based on selected range</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-4">
+        <div class="card summary-card">
+          <div class="card-body">
+            <div class="summary-card-inner">
+              <div class="summary-icon summary-icon-green">
+                <i class="bi bi-activity"></i>
+              </div>
+              <div class="summary-card-content">
+                <h6 class="card-subtitle text-muted">Average Intake Per Feeding</h6>
+                <h2 id="analyticsAverageIntake" class="card-value text-success">0g</h2>
+                <small class="text-muted">across all cats</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main analytics area: one row per cat (summary left, trend right) -->
+    <div id="catAnalyticsContainer">
+      <!-- Each cat row is rendered by analytics.js -->
+    </div>
+
+    <footer class="app-footer">
+      Smart Multi-Cat Feeder &middot; Frontend Prototype &middot; Last sync: loading... &middot; Device: FEEDER-01
+    </footer>
+  </main>
+
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="static/js/api.js?v=20260518-cat-profile-sync"></script>
+  <script src="static/js/analytics.js?v=20260517-analytics-time-axis-empty"></script>
+</body>
+</html>

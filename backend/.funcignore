@@ -1,0 +1,13 @@
+.git*
+.venv/
+__pycache__/
+.pytest_cache/
+.azure-cli-extensions/
+.python_packages/
+tests/
+local.settings.json
+5506-iot-smart-cat-feeder-frontend/
+hardwarecode/
+*.bundle
+*.md
+*.pdf

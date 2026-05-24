@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>Cat Management - Smart Multi-Cat Feeder</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+
+  <link rel="stylesheet" href="static/css/style.css" />
+</head>
+
+<body>
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container-fluid">
+      <a class="navbar-brand fw-bold" href="index.html">
+        Smart Multi-Cat Feeder
+      </a>
+
+      <button
+        class="navbar-toggler"
+        type="button"
+        data-bs-toggle="collapse"
+        data-bs-target="#navbarNav"
+      >
+        <span class="navbar-toggler-icon"></span>
+      </button>
+
+      <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav ms-auto">
+          <li class="nav-item">
+            <a class="nav-link" href="index.html">Dashboard</a>
+          </li>
+
+          <li class="nav-item">
+            <a class="nav-link" href="records.html?v=20260518-records-range">Feeding Records</a>
+          </li>
+
+          <li class="nav-item">
+            <a class="nav-link" href="analytics.html">Analytics</a>
+          </li>
+
+          <li class="nav-item">
+            <a class="nav-link" href="alerts.html">Health Alerts</a>
+          </li>
+
+          <li class="nav-item">
+            <a class="nav-link active" href="cats.html">Cat Management</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container my-4">
+    <div class="page-heading-row mb-4">
+      <div>
+        <h1 class="page-title">Cat & RFID Management</h1>
+        <p class="text-muted mb-0">
+          Manage up to two cat profiles, RFID tag binding, assigned feeding bowls, and daily intake targets.
+        </p>
+      </div>
+
+      <div class="device-sync-pill">
+        <span class="sync-dot"></span>
+        <span>Last sync: loading...</span>
+        <span class="sync-divider"></span>
+        <span>Device ID: FEEDER-01</span>
+      </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+      <div class="col-md-3">
+        <div class="card summary-card">
+          <div class="card-body">
+            <div class="summary-card-inner">
+              <div class="summary-icon summary-icon-blue">
+                <i class="bi bi-people-fill"></i>
+              </div>
+              <div class="summary-card-content">
+                <h6 class="card-subtitle text-muted">Total Cats</h6>
+                <h2 id="totalCats" class="card-value text-primary">0</h2>
+                <small class="text-muted">of 2 maximum</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-3">
+        <div class="card summary-card">
+          <div class="card-body">
+            <div class="summary-card-inner">
+              <div class="summary-icon summary-icon-green">
+                <i class="bi bi-upc-scan"></i>
+              </div>
+              <div class="summary-card-content">
+                <h6 class="card-subtitle text-muted">RFID Tags</h6>
+                <h2 id="totalRfidTags" class="card-value text-success">0</h2>
+                <small class="text-muted">bound and active</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-3">
+        <div class="card summary-card">
+          <div class="card-body">
+            <div class="summary-card-inner">
+              <div class="summary-icon summary-icon-purple">
+                <i class="bi bi-cup-fill"></i>
+              </div>
+              <div class="summary-card-content">
+                <h6 class="card-subtitle text-muted">Assigned Bowls</h6>
+                <h2 id="assignedBowls" class="card-value">0</h2>
+                <small class="text-muted">bowls in use</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-3">
+        <div class="card summary-card">
+          <div class="card-body">
+            <div class="summary-card-inner">
+              <div class="summary-icon summary-icon-warning">
+                <i class="bi bi-graph-up"></i>
+              </div>
+              <div class="summary-card-content">
+                <h6 class="card-subtitle text-muted">Average Target</h6>
+                <h2 id="averageTarget" class="card-value text-warning">0g</h2>
+                <small class="text-muted">per cat per day</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row g-4 mb-4">
+      <div class="col-lg-8">
+        <div class="card h-100">
+          <div class="card-header fw-bold" id="formTitle">
+            Add New Cat
+          </div>
+
+          <div class="card-body">
+            <form id="catForm">
+              <input type="hidden" id="catId" />
+
+              <div class="row g-3">
+                <div class="col-md-3">
+                  <label for="catName" class="form-label">Cat Name</label>
+                  <input
+                    id="catName"
+                    type="text"
+                    class="form-control"
+                    placeholder="e.g. Luna"
+                    required
+                  />
+                  <small class="text-muted">Enter a unique cat name.</small>
+                </div>
+
+                <div class="col-md-3">
+                  <label for="rfidTag" class="form-label">RFID Tag</label>
+                  <input
+                    id="rfidTag"
+                    type="text"
+                    class="form-control"
+                    placeholder="Scan or enter RFID"
+                    required
+                  />
+                  <small class="text-muted">Read from RFID reader.</small>
+                </div>
+
+                <div class="col-md-3">
+                  <label for="assignedBowl" class="form-label">Assigned Bowl</label>
+                  <select id="assignedBowl" class="form-select" required>
+                    <option value="">Select bowl</option>
+                    <option value="1">Bowl 1</option>
+                    <option value="2">Bowl 2</option>
+                  </select>
+                  <small class="text-muted">Maximum 2 bowls.</small>
+                </div>
+
+                <div class="col-md-3">
+                  <label for="dailyTarget" class="form-label">Daily Target (g)</label>
+                  <input
+                    id="dailyTarget"
+                    type="number"
+                    min="1"
+                    class="form-control"
+                    placeholder="e.g. 70"
+                    required
+                  />
+                  <small class="text-muted">Recommended: 30â€?0g.</small>
+                </div>
+              </div>
+
+              <div class="mt-4 d-flex flex-wrap gap-2">
+                <button type="submit" class="btn btn-primary" id="saveCatBtn">
+                  Add Cat
+                </button>
+
+                <button type="button" class="btn btn-outline-secondary" id="cancelEditBtn">
+                  Cancel
+                </button>
+
+                <button type="button" class="btn btn-outline-info" id="generateRfidBtn">
+                  Simulate RFID Scan
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-4">
+        <div class="card h-100">
+          <div class="card-header fw-bold">
+            RFID Binding Status
+          </div>
+
+          <div class="card-body">
+            <p class="mb-2">
+              <strong>Status:</strong>
+            </p>
+
+            <p id="rfidStatus" class="text-success fw-bold">
+              Waiting for user action.
+            </p>
+
+            <p class="text-muted">
+              This prototype supports a maximum of 2 cats. In the real system,
+              the web interface sends a binding request to the backend. The ESP32
+              reads the RFID tag and returns the tag ID.
+            </p>
+
+            <div class="alert alert-primary mb-0">
+              Keep the RFID tag close to the reader during binding.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <div>
+          <div class="fw-bold">Registered Cats</div>
+          <small class="text-muted">
+            Manage cat profiles and RFID assignments. Maximum of 2 cats supported.
+          </small>
+        </div>
+
+        <span id="slotsUsed" class="capacity-pill">
+          0 of 2 slots used
+        </span>
+      </div>
+
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table table-hover align-middle">
+            <thead>
+              <tr>
+                <th>Cat ID</th>
+                <th>Cat Name</th>
+                <th>RFID Tag</th>
+                <th>Assigned Bowl</th>
+                <th>Daily Target</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+
+            <tbody id="catsTable"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <footer class="app-footer">
+      Smart Multi-Cat Feeder &middot; Frontend Prototype &middot; Last sync: loading... &middot; Device: FEEDER-01 &middot; Supports up to 2 cats
+    </footer>
+  </main>
+
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="static/js/api.js?v=20260518-cat-profile-sync"></script>
+  <script src="static/js/cats.js?v=20260518-cat-profile-sync"></script>
+</body>
+</html>

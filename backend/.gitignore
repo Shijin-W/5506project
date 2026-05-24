@@ -1,0 +1,11 @@
+__pycache__/
+.pytest_cache/
+.venv/
+local.settings.json
+*.pyc
+.azure-cli-extensions/
+.python_packages/
+*.zip
+*.bundle
+.DS_Store
+~$*

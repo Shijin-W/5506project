@@ -1,0 +1,33 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "<storage connection string>",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "IOT_HUB_EVENTHUB_CONNECTION": "<IoT Hub built-in Event Hub compatible connection string>",
+    "IOT_HUB_EVENTHUB_NAME": "<IoT Hub Event Hub-compatible name>",
+    "IOT_HUB_CONNECTION_STRING": "<IoT Hub service connection string for device twin updates>",
+    "IOT_HUB_NAME": "<existing IoT Hub name>",
+    "IOT_HUB_DEVICE_ID": "feeder-esp32-01",
+    "STORAGE_ACCOUNT_NAME": "<storage account name>",
+    "STORAGE_CONNECTION_STRING": "<storage connection string>",
+    "RAW_CONTAINER": "<existing raw container>",
+    "PARSED_CONTAINER": "parsed-events",
+    "FEEDING_CONTAINER": "feeding-events",
+    "BACKEND_DATA_CONTAINER": "backend-data",
+    "ERROR_CONTAINER": "error-events",
+    "LOCAL_TIMEZONE": "Australia/Perth",
+    "DEFAULT_TARGET_DAILY_GRAMS": "60",
+    "DEFAULT_MINIMUM_MEANINGFUL_INTAKE_GRAMS": "2",
+    "DEFAULT_OVER_TARGET_RATIO": "1.3",
+    "MIN_FEEDING_INTERVAL_HOURS": "8",
+    "ALLOW_UNKNOWN_RFID": "false",
+    "SMTP_HOST": "<smtp host, optional>",
+    "SMTP_PORT": "587",
+    "SMTP_USERNAME": "<smtp username, optional>",
+    "SMTP_PASSWORD": "<smtp password, optional>",
+    "SMTP_FROM_EMAIL": "<sender email, optional>",
+    "SMTP_USE_TLS": "true",
+    "ACS_CONNECTION_STRING": "<Azure Communication Services connection string, optional>",
+    "ACS_SENDER_EMAIL": "<verified sender address, optional>"
+  }
+}

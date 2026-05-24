@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>Smart Multi-Cat Feeder Dashboard</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+
+  <link rel="stylesheet" href="static/css/style.css" />
+</head>
+
+<body>
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container-fluid">
+      <a class="navbar-brand fw-bold" href="index.html">
+        Smart Multi-Cat Feeder
+      </a>
+
+      <button
+        class="navbar-toggler"
+        type="button"
+        data-bs-toggle="collapse"
+        data-bs-target="#navbarNav"
+      >
+        <span class="navbar-toggler-icon"></span>
+      </button>
+
+      <div class="collapse navbar-collapse" id="navbarNav">
+        <ul class="navbar-nav ms-auto">
+          <li class="nav-item">
+            <a class="nav-link active" href="index.html">Dashboard</a>
+          </li>
+
+          <li class="nav-item">
+            <a class="nav-link" href="records.html?v=20260518-records-range">Feeding Records</a>
+          </li>
+
+          <li class="nav-item">
+            <a class="nav-link" href="analytics.html">Analytics</a>
+          </li>
+
+          <li class="nav-item">
+            <a class="nav-link" href="alerts.html">Health Alerts</a>
+          </li>
+
+          <li class="nav-item">
+            <a class="nav-link" href="cats.html">Cat Management</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container my-4">
+    <div class="page-heading-row mb-4">
+      <div>
+        <h1 class="page-title">Dashboard</h1>
+        <p class="text-muted mb-0">
+          Overview of feeding activity, food intake, health alerts, and feeder status.
+        </p>
+      </div>
+
+      <div class="device-sync-pill">
+        <span class="sync-dot"></span>
+        <span>Last sync: loading...</span>
+        <span class="sync-divider"></span>
+        <span>Device ID: FEEDER-01</span>
+      </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+      <div class="col-md-3">
+        <div class="card summary-card">
+          <div class="card-body">
+            <div class="summary-card-inner">
+              <div class="summary-icon summary-icon-blue">
+                <i class="bi bi-calendar2-check-fill"></i>
+              </div>
+              <div class="summary-card-content">
+                <h6 class="card-subtitle text-muted">Today's Feedings</h6>
+                <h2 id="todayFeedings" class="card-value">0</h2>
+                <small class="text-muted">completed today</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-3">
+        <div class="card summary-card">
+          <div class="card-body">
+            <div class="summary-card-inner">
+              <div class="summary-icon summary-icon-green">
+                <i class="bi bi-basket-fill"></i>
+              </div>
+              <div class="summary-card-content">
+                <h6 class="card-subtitle text-muted">Total Intake Today</h6>
+                <h2 id="totalIntake" class="card-value">0g</h2>
+                <small class="text-muted">combined intake</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-3">
+        <div class="card summary-card">
+          <div class="card-body">
+            <div class="summary-card-inner">
+              <div class="summary-icon summary-icon-warning">
+                <i class="bi bi-exclamation-triangle-fill"></i>
+              </div>
+              <div class="summary-card-content">
+                <h6 class="card-subtitle text-muted">Active Alerts</h6>
+                <h2 id="activeAlerts" class="card-value text-danger">0</h2>
+                <small class="text-muted">requires attention</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-3">
+        <div class="card summary-card">
+          <div class="card-body">
+            <div class="summary-card-inner">
+              <div class="summary-icon summary-icon-green">
+                <i class="bi bi-cpu-fill"></i>
+              </div>
+              <div class="summary-card-content">
+                <h6 class="card-subtitle text-muted">Device Status</h6>
+                <h2 id="deviceStatus" class="card-value text-success">Online</h2>
+                <small class="text-muted">all systems normal</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row g-4">
+      <div class="col-lg-6">
+        <div class="card">
+          <div class="card-header fw-bold">
+            Today's Intake by Cat
+          </div>
+
+          <div class="card-body">
+            <table class="table table-hover align-middle">
+              <thead>
+                <tr>
+                  <th>Cat Name</th>
+                  <th>RFID Tag</th>
+                  <th>Intake</th>
+                  <th>Daily Target</th>
+                </tr>
+              </thead>
+
+              <tbody id="catIntakeTable"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-6">
+        <div class="card">
+          <div class="card-header fw-bold">
+            Latest Feeding Records
+          </div>
+
+          <div class="card-body">
+            <table class="table table-hover align-middle">
+              <thead>
+                <tr>
+                  <th>Cat</th>
+                  <th>Time</th>
+                  <th>Intake</th>
+                </tr>
+              </thead>
+
+              <tbody id="latestRecordsTable"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mt-4">
+      <div class="card-header fw-bold">
+        Recent Health Alerts
+      </div>
+
+      <div class="card-body" id="recentAlerts"></div>
+    </div>
+
+    <footer class="app-footer">
+      Smart Multi-Cat Feeder &middot; Frontend Prototype &middot; Last sync: loading... &middot; Device: FEEDER-01
+    </footer>
+  </main>
+
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="static/js/api.js?v=20260518-dashboard-recent-alerts"></script>
+  <script src="static/js/dashboard.js?v=20260518-dashboard-recent-alerts"></script>
+</body>
+</html>
